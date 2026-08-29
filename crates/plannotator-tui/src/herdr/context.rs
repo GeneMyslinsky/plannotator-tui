@@ -47,6 +47,8 @@ pub(crate) struct HerdrEnv {
     pub(crate) plugin_id: Option<String>,
     /// `PLANNOTATOR_TUI_MESSAGE_PID`: open this agent's last message instead of a file.
     pub(crate) message_pid: Option<u32>,
+    /// `PLANNOTATOR_TUI_SESSION`: an explicit agent transcript for last-message review.
+    pub(crate) session: Option<PathBuf>,
     /// `PLANNOTATOR_TUI_HOST`: which agent's transcript format to read.
     pub(crate) host: Option<String>,
 }
@@ -71,6 +73,7 @@ impl HerdrEnv {
             placement: non_empty("PLANNOTATOR_TUI_PLACEMENT"),
             plugin_id: non_empty("HERDR_PLUGIN_ID"),
             message_pid: non_empty("PLANNOTATOR_TUI_MESSAGE_PID").and_then(|v| v.parse().ok()),
+            session: non_empty("PLANNOTATOR_TUI_SESSION").map(PathBuf::from),
             host: non_empty("PLANNOTATOR_TUI_HOST"),
         }
     }
@@ -167,5 +170,12 @@ mod tests {
         let env = env(&[("HERDR_ENV", "1"), ("HERDR_PANE_ID", "w1:p3")]);
         assert_eq!(env.pane_id.as_deref(), Some("w1:p3"));
         assert_eq!(env.delivery_target(), None);
+    }
+
+    #[test]
+    fn session_environment_is_available_to_the_pane_entrypoint() {
+        let env = env(&[("PLANNOTATOR_TUI_HOST", "omp"), ("PLANNOTATOR_TUI_SESSION", "/sessions/omp.jsonl")]);
+        assert_eq!(env.host.as_deref(), Some("omp"));
+        assert_eq!(env.session, Some(PathBuf::from("/sessions/omp.jsonl")));
     }
 }

@@ -23,6 +23,8 @@ pub enum Host {
     /// Droid (Factory): `~/.factory/sessions/<slug>/<session>.jsonl`, Claude's shape, file order.
     Droid,
     Pi,
+    /// Oh My Pi: an explicit session JSONL is parsed with Pi's message reader.
+    Omp,
 }
 
 impl Host {
@@ -34,11 +36,13 @@ impl Host {
             Self::Copilot => "copilot",
             Self::Droid => "droid",
             Self::Pi => "pi",
+            Self::Omp => "omp",
         }
     }
 
     /// Every host with a transcript reader, for messages that list them.
-    pub const ALL: [Host; 5] = [Host::ClaudeCode, Host::Codex, Host::Pi, Host::Copilot, Host::Droid];
+    pub const ALL: [Host; 6] =
+        [Host::ClaudeCode, Host::Codex, Host::Pi, Host::Omp, Host::Copilot, Host::Droid];
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -109,6 +113,7 @@ pub fn detect_host(env: impl Fn(&str) -> Option<String>) -> Result<Host, HostErr
             "copilot" | "copilot-cli" | "copilot_cli" => return Ok(Host::Copilot),
             "droid" | "factory" => return Ok(Host::Droid),
             "pi" => return Ok(Host::Pi),
+            "omp" => return Ok(Host::Omp),
             _ => {}
         }
     }
@@ -122,10 +127,13 @@ pub fn detect_host(env: impl Fn(&str) -> Option<String>) -> Result<Host, HostErr
     if env("AI_AGENT").is_some_and(|v| v.trim().eq_ignore_ascii_case("pi")) || set("PI_CODING_AGENT") {
         return Ok(Host::Pi);
     }
-    for (key, name) in [("OPENCODE", "OpenCode"), ("GEMINI_CLI", "Gemini CLI"), ("OMPCODE", "OMP")] {
+    for (key, name) in [("OPENCODE", "OpenCode"), ("GEMINI_CLI", "Gemini CLI")] {
         if set(key) {
             return Err(HostError::Unsupported(name.to_owned()));
         }
+    }
+    if set("OMPCODE") {
+        return Ok(Host::Omp);
     }
     Ok(Host::ClaudeCode)
 }

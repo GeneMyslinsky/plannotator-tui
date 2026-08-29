@@ -24,9 +24,66 @@ fn print_writes_the_newest_assistant_message_of_a_claude_transcript() {
         .find(|m| m.role == Role::Assistant)
         .expect("fixture has an assistant message")
         .text;
-    let out = bin().args(["last", "--session"]).arg(&transcript).arg("--print").output().expect("runs");
+    let out = bin()
+        .args(["last", "--host", "claude", "--session"])
+        .arg(&transcript)
+        .arg("--print")
+        .output()
+        .expect("runs");
     assert!(out.status.success());
     assert_eq!(String::from_utf8_lossy(&out.stdout).trim_end(), expected.trim_end());
+}
+
+#[test]
+fn print_skips_a_newer_human_prompt() {
+    let transcript =
+        std::env::temp_dir().join(format!("plannotator-tui-last-print-{}.jsonl", std::process::id()));
+    std::fs::write(
+        &transcript,
+        concat!(
+            r#"{"type":"user","uuid":"u1","parentUuid":null,"message":{"role":"user","content":"older prompt"}}"#,
+            "\n",
+            r#"{"type":"assistant","uuid":"a1","parentUuid":"u1","message":{"id":"a1","role":"assistant","content":[{"type":"text","text":"assistant reply"}]}}"#,
+            "\n",
+            r#"{"type":"user","uuid":"u2","parentUuid":"a1","message":{"role":"user","content":"newer prompt"}}"#,
+        ),
+    )
+    .expect("writes transcript");
+
+    let out = bin()
+        .args(["last", "--host", "claude", "--session"])
+        .arg(&transcript)
+        .arg("--print")
+        .output()
+        .expect("runs");
+    std::fs::remove_file(&transcript).expect("removes transcript");
+
+    assert!(out.status.success());
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim_end(), "assistant reply");
+    assert!(out.stderr.is_empty());
+}
+
+#[test]
+fn print_keeps_the_harmless_failure_contract_for_a_human_only_transcript() {
+    let transcript =
+        std::env::temp_dir().join(format!("plannotator-tui-last-human-only-{}.jsonl", std::process::id()));
+    std::fs::write(
+        &transcript,
+        r#"{"type":"user","uuid":"u1","parentUuid":null,"message":{"role":"user","content":"a human prompt"}}"#,
+    )
+    .expect("writes transcript");
+
+    let out = bin()
+        .args(["last", "--host", "claude", "--session"])
+        .arg(&transcript)
+        .arg("--print")
+        .output()
+        .expect("runs");
+    std::fs::remove_file(&transcript).expect("removes transcript");
+
+    assert!(out.status.success(), "exit 0 is the contract");
+    assert!(out.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("no assistant messages yet"));
 }
 
 #[test]
@@ -123,4 +180,31 @@ fn print_writes_the_newest_assistant_message_of_a_pi_session() {
         .expect("runs");
     assert!(out.status.success());
     assert_eq!(String::from_utf8_lossy(&out.stdout).trim_end(), expected.trim_end());
+}
+
+#[test]
+fn print_reads_an_explicit_omp_session_with_the_pi_parser() {
+    let transcript = fixtures().join("pi.jsonl");
+    let text = std::fs::read_to_string(&transcript).expect("fixture");
+    let expected = pi::parse_messages(&text, 25)
+        .into_iter()
+        .find(|m| m.role == Role::Assistant)
+        .expect("fixture has an assistant message")
+        .text;
+    let out = bin()
+        .args(["last", "--host", "omp", "--session"])
+        .arg(&transcript)
+        .arg("--print")
+        .output()
+        .expect("runs");
+    assert!(out.status.success());
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim_end(), expected.trim_end());
+}
+
+#[test]
+fn print_reports_that_omp_requires_an_explicit_session() {
+    let out = bin().args(["last", "--host", "omp", "--print"]).output().expect("runs");
+    assert!(out.status.success(), "exit 0 is the contract");
+    assert!(out.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("OMP requires an explicit session path"));
 }

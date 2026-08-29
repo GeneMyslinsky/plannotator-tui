@@ -186,13 +186,89 @@ fn a_last_launch_carries_the_pid_and_host_instead_of_a_file() {
         &Config::default(),
         OpenArgs::default(),
         Path::new("/"),
-        PROCESS_INFO,
+        None,
+        || Ok(PROCESS_INFO.to_owned()),
     )
     .expect("plans");
-    assert_eq!(launch.message, Some((91279, "claude".into())));
+    assert_eq!(launch.message, Some(MessageSource::Pid { pid: 91279, host: "claude".into() }));
     assert_eq!(launch.deliver.as_ref().map(|t| t.pane.as_str()), Some("w1:p1"));
     let args = argv(&launch);
     assert!(args.contains(&"PLANNOTATOR_TUI_MESSAGE_PID=91279".to_owned()));
     assert!(args.contains(&"PLANNOTATOR_TUI_HOST=claude".to_owned()));
+    assert!(!args.iter().any(|a| a.starts_with("PLANNOTATOR_TUI_SESSION=")));
     assert!(!args.iter().any(|a| a.starts_with("PLANNOTATOR_TUI_FILE=")));
+}
+
+const OMP_AGENT_LIST: &str = r#"{"id":"cli:agent:list","result":{"agents":[{"pane_id":"w1:p1","agent":"omp","agent_session":{"kind":"path","value":"/sessions/omp.jsonl"}}]}}"#;
+
+#[test]
+fn an_omp_session_from_the_target_agent_record_is_the_last_launch_source() {
+    let root = temp_folder("omp-session");
+    let context = HerdrContext {
+        focused_pane_id: Some("w1:p1".into()),
+        focused_pane_agent: Some("omp".into()),
+        focused_pane_cwd: Some(root.display().to_string()),
+        ..HerdrContext::default()
+    };
+    let launch = plan_last(
+        &env(None, Some(context)),
+        &Config::default(),
+        OpenArgs::default(),
+        Path::new("/"),
+        Some(OMP_AGENT_LIST),
+        || anyhow::bail!("an OMP session must not query process-info"),
+    )
+    .expect("plans");
+    assert_eq!(
+        launch.message,
+        Some(MessageSource::Session { session: PathBuf::from("/sessions/omp.jsonl"), host: "omp".into() })
+    );
+    let args = argv(&launch);
+    let envs: Vec<&str> =
+        args.windows(2).filter(|pair| pair[0] == "--env").map(|pair| pair[1].as_str()).collect();
+    let cwd_env = format!("PLANNOTATOR_TUI_CWD={}", root.display());
+    assert_eq!(
+        envs,
+        [
+            "PLANNOTATOR_TUI_HOST=omp",
+            "PLANNOTATOR_TUI_SESSION=/sessions/omp.jsonl",
+            cwd_env.as_str(),
+            "PLANNOTATOR_TUI_DELIVER_TO=w1:p1",
+            "PLANNOTATOR_TUI_DELIVER_AGENT=omp",
+        ]
+    );
+    std::fs::remove_dir_all(&root).expect("cleanup");
+}
+
+#[test]
+fn malformed_relative_or_mismatched_omp_data_uses_the_pid_source() {
+    let agent_lists = [
+        "not json",
+        r#"{"result":{"agents":[{"pane_id":"w1:p1","agent":"omp"}]}}"#,
+        r#"{"result":{"agents":[{"pane_id":"w1:p1","agent":"omp","agent_session":{"kind":"id","value":"session-id"}}]}}"#,
+        r#"{"result":{"agents":[{"pane_id":"w1:p1","agent":"omp","agent_session":{"kind":"path","value":"sessions/omp.jsonl"}}]}}"#,
+        r#"{"result":{"agents":[{"pane_id":"w1:p2","agent":"omp","agent_session":{"kind":"path","value":"/sessions/omp.jsonl"}}]}}"#,
+        r#"{"result":{"agents":[{"pane_id":"w1:p1","agent":"claude","agent_session":{"kind":"path","value":"/sessions/omp.jsonl"}}]}}"#,
+    ];
+    for agents in agent_lists {
+        let context = HerdrContext {
+            focused_pane_id: Some("w1:p1".into()),
+            focused_pane_agent: Some("omp".into()),
+            focused_pane_cwd: Some("/w".into()),
+            ..HerdrContext::default()
+        };
+        let launch = plan_last(
+            &env(None, Some(context)),
+            &Config::default(),
+            OpenArgs::default(),
+            Path::new("/"),
+            Some(agents),
+            || Ok(PROCESS_INFO.to_owned()),
+        )
+        .expect("falls back to process-info");
+        assert_eq!(launch.message, Some(MessageSource::Pid { pid: 91279, host: "claude".into() }));
+        let args = argv(&launch);
+        assert!(args.contains(&"PLANNOTATOR_TUI_MESSAGE_PID=91279".to_owned()));
+        assert!(!args.iter().any(|arg| arg.starts_with("PLANNOTATOR_TUI_SESSION=")));
+    }
 }

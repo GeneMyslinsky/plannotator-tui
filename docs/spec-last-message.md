@@ -1,4 +1,4 @@
-# Spec: annotate the agent's last message (`plannotator-tui last`)
+# Spec: review recent conversation messages (`plannotator-tui last`)
 
 Status: contract for phase 4, 2026-08-28. Detection and extraction rules are decision 9
 (verified against Plannotator's source and this machine's `~/.claude` and `~/.codex`).
@@ -9,18 +9,21 @@ Status: contract for phase 4, 2026-08-28. Detection and extraction rules are dec
   Finds an agent's transcript and extracts its recent rendered messages. No spawning, no
   `~` lookups; the binary crate injects `sessions_dir`, `projects_dir`, a process-table
   snapshot, and env.
-- `plannotator-tui last`: the CLI. Detects the host, finds the transcript, shows a picker of
-  the newest messages, opens the chosen one as a transient document (`Provenance::AgentMessage`),
-  and delivers feedback through the normal seam (clipboard standalone, the agent pane in Herdr).
-- Herdr: `plannotator-tui herdr last` resolves the agent's pid from `herdr pane process-info`
-  and opens the pane with `PLANNOTATOR_TUI_MESSAGE_PID`; `plannotator-tui herdr pane` is the
-  pane entrypoint that reads the env and opens either a file or a message.
+- `plannotator-tui last`: the CLI. Detects the host, finds the transcript, and shows a picker
+  of newest rendered human and assistant messages. One selected message opens as its raw
+  transient document; two or more open as one chronological conversation review
+  (`Provenance::AgentMessage`). Feedback uses the normal seam (clipboard standalone, the agent
+  pane in Herdr).
+- Herdr: `plannotator-tui herdr last` resolves the target pane's transcript source and opens the
+  pane with `PLANNOTATOR_TUI_MESSAGE_PID` for normal hosts or an explicit
+  `PLANNOTATOR_TUI_SESSION` for OMP. `plannotator-tui herdr pane` reads that env and opens
+  either a file or a message.
 
 ## `plannotator-tui-hosts` API (freeze this; F2 codes against it)
 
 ```rust
-pub enum Host { ClaudeCode, Codex }
-impl Host { pub fn label(self) -> &'static str }            // "claude", "codex"
+pub enum Host { ClaudeCode, Codex, Pi, Copilot, Droid, Omp }
+impl Host { pub fn label(self) -> &'static str }            // "claude", "codex", "pi", "copilot", "droid", "omp"
 
 pub enum Role { Human, Assistant }
 
@@ -29,8 +32,8 @@ pub struct Message { pub id: String, pub role: Role, pub text: String, pub at: O
 
 pub struct SessionMeta { pub pid: u32, pub session_id: String, pub cwd: PathBuf, pub started_at: u64 }
 
-/// Env chain from decision 9; `PLANNOTATOR_TUI_HOST` overrides. Default Claude Code.
-pub fn detect_host(env: impl Fn(&str) -> Option<String>) -> Host;
+/// `PLANNOTATOR_TUI_HOST` overrides; `OMPCODE` selects OMP; default Claude Code.
+pub fn detect_host(env: impl Fn(&str) -> Option<String>) -> Result<Host, HostError>;
 
 pub mod claude {
     pub fn parse_session_meta(json: &str) -> Option<SessionMeta>;
@@ -52,12 +55,19 @@ pub mod codex {
     pub fn parse_messages(jsonl_files: &[String], n: usize) -> Vec<Message>;
 }
 
-pub enum HostError { NoTranscript(String), NoMessages(String), Io(std::io::Error) }
+/// OMP JSONL has Pi's message shape. OMP parses only an explicit session path with this reader;
+/// it never guesses a session from a profile or cwd.
+pub mod pi {
+    pub fn parse_messages(jsonl: &str, n: usize) -> Vec<Message>;
+}
+
+pub enum HostError { NoTranscript(String), NoMessages(String), Unsupported(String), Io(std::io::Error) }
 ```
 
-Human-prompt filter (decision 9) applies to `Role::Human`: not `isMeta`, not sidechain, not
+Human-prompt filtering (decision 9) applies to `Role::Human`: not `isMeta`, not sidechain, not
 `<local-command-…>` / `<command-name>` / `<system-reminder>` / `<system-notification>`
-prefixes. The picker shows assistant messages by default; humans are kept for context only.
+prefixes. The picker offers human prompts and assistant replies for standalone or combined
+chronological conversation review.
 
 Fixtures: `crates/plannotator-tui-hosts/tests/fixtures/claude-code.jsonl` and `codex.jsonl`,
 cut from real transcripts on this machine with every text body replaced by a short
@@ -70,29 +80,32 @@ user entry, an `isSidechain` entry, bookkeeping entries without uuids written la
 
 ```
 PLANNOTATOR_TUI_MESSAGE_PID   open the last message of the agent with this pid (launcher → pane)
-PLANNOTATOR_TUI_HOST          claude | codex; overrides detection (any context)
-PLANNOTATOR_TUI_SESSION       explicit transcript path; skips detection (any context)
-```
+PLANNOTATOR_TUI_HOST          claude | codex | pi | copilot | droid | omp; overrides detection
+PLANNOTATOR_TUI_SESSION       explicit transcript path for the selected host; required when host is omp
 
-`plannotator-tui herdr pane` precedence: `PLANNOTATOR_TUI_MESSAGE_PID` → `PLANNOTATOR_TUI_FILE`
-→ `$PWD`. The delivery target is unchanged (`PLANNOTATOR_TUI_DELIVER_TO`).
+`plannotator-tui herdr pane` runs last-message review when `PLANNOTATOR_TUI_MESSAGE_PID` or
+`PLANNOTATOR_TUI_SESSION` is set; otherwise it opens `PLANNOTATOR_TUI_FILE` or `$PWD`.
+The delivery target is unchanged (`PLANNOTATOR_TUI_DELIVER_TO`).
 
 ## CLI
 
 ```
 plannotator-tui last [--host H] [--pid N] [--session PATH] [--stdin] [--print] [--pick N]
 ```
-- default: detect → find → picker of the newest 25 assistant messages → annotate → send.
-- `--print`: newest message text on stdout, exit 0 (the delivery contract from decision 9).
+- default: detect → find → picker of the newest 25 rendered human and assistant messages.
+  `Space` selects messages; `Enter` opens one raw message or a chronological combined review;
+  `Esc` keeps the newest assistant reply.
+- OMP: requires `--session PATH` (or `PLANNOTATOR_TUI_SESSION` in a pane) and parses that JSONL
+  with the Pi reader; it never searches profiles or cwd.
+- `--print`: newest assistant reply text on stdout, exit 0 (the delivery contract from decision 9).
 - `--stdin`: the document is stdin; no detection.
 - Errors name what was searched: "no Claude Code transcript for pid 1234 (looked in …)".
 
 ## Herdr
-
 - Action `last` in the manifest → `plannotator-tui herdr last`: target pane = context focused
-  pane (agent) or `HERDR_PANE_ID`; `herdr pane process-info --pane <id>` → the process whose
-  name identifies the agent (`claude`, `codex`; else the foreground group leader) → pid; host
-  from that name; then `plugin pane open` as `herdr open` does, with
-  `PLANNOTATOR_TUI_MESSAGE_PID`, `PLANNOTATOR_TUI_HOST`, `PLANNOTATOR_TUI_DELIVER_TO`.
-- In the pane, `find_transcript` starts at that pid (`sessions/<pid>.json` is a direct hit).
+  pane (agent) or `HERDR_PANE_ID`. Normal hosts use `herdr pane process-info --pane <id>` to
+  identify the agent and pass `PLANNOTATOR_TUI_MESSAGE_PID`; OMP passes only its explicit
+  `agent_session` path as `PLANNOTATOR_TUI_SESSION`, with `PLANNOTATOR_TUI_HOST=omp`.
+- In the pane, normal hosts can locate a transcript from the pid (`sessions/<pid>.json` is a
+  direct Claude Code hit); OMP reads only its explicit session.
 - Manifest pane command becomes `plannotator-tui herdr pane`.

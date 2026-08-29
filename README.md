@@ -44,7 +44,7 @@ Prebuilt binaries for macOS, Linux and Windows are on the
 ```sh
 plannotator-tui docs/plan.md      # one file
 plannotator-tui docs               # a folder: file tree on the left, counts per file
-plannotator-tui last               # your coding agent's recent replies, pick one, annotate it
+plannotator-tui last               # your coding agent's recent conversation; select messages to review
 ```
 
 Drag with the mouse (or `v` and move) to select, then `a` 👍 · `c` 💬 · `d` ✗. `E` copies the
@@ -62,8 +62,8 @@ review to the clipboard as numbered annotations (`# Annotations on plan.md`, `##
 ## Inside Herdr
 
 Install [Herdr Annotate](https://github.com/plannotator/herdr-annotate); it bundles this binary,
-opens it in a pane with `prefix+o` (folder) or `prefix+shift+o` (agent's last reply) or by
-Ctrl-clicking a `file://…md` link, and the header button sends the review straight back to
+opens it in a pane with `prefix+o` (folder) or `prefix+shift+o` (agent's recent conversation) or
+by Ctrl-clicking a `file://…md` link, and the header button sends the review straight back to
 the agent as its next message: `Send 3 to claude in w1:p2 ▸`.
 
 ```toml
@@ -75,13 +75,16 @@ placement = "overlay"   # overlay (full tab, default) | split | popup
 `plannotator-tui config` prints the file's path and the values in effect. The `herdr/`
 directory in this repo is the development manifest; users should install Herdr Annotate.
 
-## Agent replies
+## Agent conversations
 
 `plannotator-tui last` finds the transcript of the agent that launched your shell and shows a
-picker of its recent replies. Hosts: Claude Code, Codex, pi, GitHub Copilot CLI, Droid.
-`--host`, `--pid`, `--session <transcript>` override detection; `--stdin` reads a document;
-`--print` writes the newest reply to stdout and always exits 0 (for hooks and scripts).
-Reply reviews are never written to disk.
+picker of its recent human prompts and assistant replies. Press `Space` to select one or more
+messages; `Enter` opens one message's raw source or a combined review in chronological order.
+`Esc` keeps the newest assistant reply. Hosts: Claude Code, Codex, pi, GitHub Copilot CLI,
+Droid, OMP. `--host`, `--pid`, `--session <transcript>` override detection; OMP requires an
+explicit `--session PATH` and never searches for a profile or cwd match. `--stdin` reads a
+document; `--print` writes only the newest assistant reply to stdout and always exits 0 (for
+hooks and scripts). These transient reviews are never written to disk.
 
 ## Where annotations live
 

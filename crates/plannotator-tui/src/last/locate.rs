@@ -1,4 +1,4 @@
-//! Find the transcript and read its recent assistant messages. The only module that looks
+//! Find the transcript and read its recent rendered messages. The only module that looks
 //! at the home directory, the environment, or the process table.
 
 use std::path::{Path, PathBuf};
@@ -14,7 +14,7 @@ pub(crate) struct Located {
     pub(crate) host: Host,
     /// The transcript file (Claude) or the newest thread file (Codex); for the label.
     pub(crate) transcript: PathBuf,
-    /// Assistant messages, newest first, at most `options.pick`.
+    /// Rendered Human and Assistant messages, newest first, at most `options.pick`.
     pub(crate) messages: Vec<Message>,
 }
 
@@ -53,12 +53,55 @@ pub(crate) fn locate(options: &LastOptions) -> Result<Located> {
             let messages = pi_messages(&path, pick)?;
             (path, messages)
         }
+        (Host::Omp, Some(path)) => (path.clone(), pi_messages(path, pick)?),
+        (Host::Omp, None) => bail!("OMP requires an explicit session path; use --session PATH"),
     };
-    let messages: Vec<Message> = messages.into_iter().filter(|m| m.role == Role::Assistant).collect();
+    let messages = picker_candidates(messages);
     if messages.is_empty() {
-        bail!("transcript {} has no assistant messages yet", transcript.display());
+        bail!("transcript {} has no rendered messages yet", transcript.display());
     }
     Ok(Located { host, transcript, messages })
+}
+
+/// The picker receives only renderable conversation messages, newest first.
+fn picker_candidates(messages: Vec<Message>) -> Vec<Message> {
+    messages
+        .into_iter()
+        .filter(|message| {
+            matches!(message.role, Role::Human | Role::Assistant) && !message.text.trim().is_empty()
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::picker_candidates;
+    use plannotator_tui_hosts::{Message, Role};
+
+    fn message(role: Role, text: &str) -> Message {
+        Message { id: text.to_owned(), role, text: text.to_owned(), at: None }
+    }
+
+    #[test]
+    fn picker_candidates_keep_non_empty_human_and_assistant_messages_newest_first() {
+        let messages = picker_candidates(vec![
+            message(Role::Human, "newest prompt"),
+            message(Role::Assistant, "latest reply"),
+            message(Role::Human, "  \n"),
+            message(Role::Assistant, "older reply"),
+        ]);
+
+        let rendered: Vec<(Role, &str)> =
+            messages.iter().map(|message| (message.role, message.text.as_str())).collect();
+        assert_eq!(
+            rendered,
+            vec![
+                (Role::Human, "newest prompt"),
+                (Role::Assistant, "latest reply"),
+                (Role::Assistant, "older reply"),
+            ]
+        );
+    }
 }
 
 fn host_for(options: &LastOptions) -> Result<Host> {

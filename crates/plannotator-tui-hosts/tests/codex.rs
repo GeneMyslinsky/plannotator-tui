@@ -4,7 +4,10 @@
 
 use std::path::Path;
 
-use plannotator_tui_hosts::codex::{find_transcripts, parse_messages};
+use plannotator_tui_hosts::{
+    Role,
+    codex::{find_transcripts, parse_messages},
+};
 
 const THREAD: &str = "01a04583-a848-7b21-a890-f3ed0c9fef05";
 
@@ -39,11 +42,15 @@ fn without_a_thread_id_the_newest_non_subagent_rollout_picks_the_thread() {
 }
 
 #[test]
-fn the_active_turn_is_the_one_started_after_the_last_completion() {
+fn the_active_turn_keeps_rendered_human_and_assistant_messages_newest_first() {
     let files = contents(&find_transcripts(home(), Some(THREAD)));
     let messages = parse_messages(&files, 10);
-    let texts: Vec<&str> = messages.iter().map(|m| m.text.as_str()).collect();
-    assert_eq!(texts, vec!["assistant text 5 (in progress)"]);
+    let rendered: Vec<(Role, &str)> =
+        messages.iter().map(|message| (message.role, message.text.as_str())).collect();
+    assert_eq!(
+        rendered,
+        vec![(Role::Assistant, "assistant text 5 (in progress)"), (Role::Human, "user prompt 3"),]
+    );
     assert_eq!(messages[0].id, "m-a5");
 }
 
@@ -51,11 +58,12 @@ fn the_active_turn_is_the_one_started_after_the_last_completion() {
 fn when_every_turn_has_completed_the_whole_thread_counts_newest_first() {
     let files = contents(&find_transcripts(home(), Some(THREAD)));
     let only_first: Vec<String> = files.iter().take(1).cloned().collect();
-    let texts: Vec<String> = parse_messages(&only_first, 10).into_iter().map(|m| m.text).collect();
-    assert_eq!(texts, vec!["assistant text 2 (final)", "assistant text 1 (commentary)"]);
+    let messages = parse_messages(&only_first, 10);
+    let texts: Vec<String> = messages.iter().map(|message| message.text.clone()).collect();
+    assert_eq!(texts, vec!["assistant text 2 (final)", "assistant text 1 (commentary)", "user prompt 1",]);
+    assert_eq!(messages[2].role, Role::Human);
     assert_eq!(parse_messages(&only_first, 1).len(), 1);
 }
-
 #[test]
 fn an_unknown_thread_has_no_files() {
     assert!(find_transcripts(home(), Some("nope")).is_empty());

@@ -1,11 +1,13 @@
 //! `plannotator-tui herdr open`: resolve what to open, where feedback goes, and how the pane is
 //! placed, then run `herdr plugin pane open`. One command for humans (manifest actions)
-//! and agents (the skill). `plan` and `argv` are pure; only `run` touches a process.
+//! and agents (the skill). `plan` and `argv` are pure; `plan_last` defers its legacy process
+//! lookup until after it has checked for an explicit OMP session.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{Context, Result};
+use serde::Deserialize;
 
 use super::context::{HerdrEnv, Target};
 use crate::config::{Config, Placement, SplitDirection};
@@ -34,8 +36,40 @@ pub(crate) struct Launch {
     pub(crate) deliver: Option<Target>,
     /// The plugin id to open under: whatever plugin ships this binary.
     pub(crate) plugin: String,
-    /// Open an agent's last message instead of `file`: (pid, host label).
-    pub(crate) message: Option<(u32, String)>,
+    /// Open an agent's last message instead of `file`.
+    pub(crate) message: Option<MessageSource>,
+}
+
+/// The unambiguous source for a last-message launch.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum MessageSource {
+    /// Locate a host transcript from the agent process.
+    Pid { pid: u32, host: String },
+    /// Read the OMP session reported for the target pane.
+    Session { session: PathBuf, host: String },
+}
+
+#[derive(Deserialize)]
+struct AgentListResponse {
+    result: AgentList,
+}
+
+#[derive(Deserialize)]
+struct AgentList {
+    agents: Vec<AgentRecord>,
+}
+
+#[derive(Deserialize)]
+struct AgentRecord {
+    pane_id: String,
+    agent: String,
+    agent_session: Option<AgentSession>,
+}
+
+#[derive(Deserialize)]
+struct AgentSession {
+    kind: String,
+    value: String,
 }
 
 /// The agent process behind a pane, from `herdr pane process-info --pane <id>` JSON: the
@@ -72,26 +106,59 @@ fn known_host(name: &str) -> Option<&'static str> {
     }
 }
 
-/// Resolve a `last` launch: the target pane as for `open`, the folder from the context, and
-/// the agent process from the pane's process info (fetched by the caller).
+/// Resolve a `last` launch: use the explicit OMP session reported for the target pane when
+/// available, otherwise defer to the legacy agent-process lookup.
 pub(crate) fn plan_last(
     env: &HerdrEnv,
     config: &Config,
     args: OpenArgs,
     cwd: &Path,
-    process_info_json: &str,
+    agent_list_json: Option<&str>,
+    process_info: impl FnOnce() -> Result<String>,
 ) -> Result<Launch> {
     let mut launch = plan(env, config, OpenArgs { path: None, ..args }, cwd)?;
     let pane = launch.deliver.as_ref().map(|t| t.pane.clone()).or_else(|| launch.target_pane.clone());
     let Some(pane) = pane else {
         anyhow::bail!("no agent pane to read: not focused on one and no --deliver-to")
     };
-    let Some(message) = agent_pid(process_info_json) else {
-        anyhow::bail!("no agent process found in pane {pane}");
+    let message = match agent_list_json.and_then(|json| omp_session(json, &pane)) {
+        Some(session) => MessageSource::Session { session, host: "omp".to_owned() },
+        None => {
+            let process_info_json = process_info()?;
+            let Some((pid, host)) = agent_pid(&process_info_json) else {
+                anyhow::bail!("no agent process found in pane {pane}");
+            };
+            MessageSource::Pid { pid, host }
+        }
     };
     launch.file.clone_from(&launch.cwd);
     launch.message = Some(message);
     Ok(launch)
+}
+
+/// The sole acceptable OMP source: the target pane's own non-empty absolute path session.
+/// Any missing, malformed, duplicate, or mismatched record deliberately falls through to the
+/// ordinary process-info route instead of guessing across OMP profiles.
+fn omp_session(agent_list_json: &str, pane: &str) -> Option<PathBuf> {
+    let agents = serde_json::from_str::<AgentListResponse>(agent_list_json).ok()?.result.agents;
+    let mut matches = agents.into_iter().filter(|record| record.pane_id == pane && record.agent == "omp");
+    let record = matches.next()?;
+    if matches.next().is_some() {
+        return None;
+    }
+    let session = record.agent_session?;
+    if session.kind != "path" || session.value.is_empty() {
+        return None;
+    }
+    let path = PathBuf::from(session.value);
+    path.is_absolute().then_some(path)
+}
+
+/// `herdr agent list`, raw JSON. Failure is intentionally absence: classic hosts retain the
+/// process-info path even against an older or unavailable Herdr agent-list command.
+pub(crate) fn agent_list(env: &HerdrEnv) -> Option<String> {
+    let output = Command::new(&env.bin).args(["agent", "list"]).output().ok()?;
+    output.status.success().then_some(output.stdout).and_then(|stdout| String::from_utf8(stdout).ok())
 }
 
 /// A `file://` URL as a local path; anything else is not ours to open.
@@ -207,9 +274,14 @@ pub(crate) fn argv(launch: &Launch) -> Vec<String> {
     out.push("--focus".to_owned());
     out.extend(["--cwd".to_owned(), launch.cwd.display().to_string()]);
     match &launch.message {
-        Some((pid, host)) => {
+        Some(MessageSource::Pid { pid, host }) => {
             out.extend(["--env".to_owned(), format!("PLANNOTATOR_TUI_MESSAGE_PID={pid}")]);
             out.extend(["--env".to_owned(), format!("PLANNOTATOR_TUI_HOST={host}")]);
+            out.extend(["--env".to_owned(), format!("PLANNOTATOR_TUI_CWD={}", launch.cwd.display())]);
+        }
+        Some(MessageSource::Session { session, host }) => {
+            out.extend(["--env".to_owned(), format!("PLANNOTATOR_TUI_HOST={host}")]);
+            out.extend(["--env".to_owned(), format!("PLANNOTATOR_TUI_SESSION={}", session.display())]);
             out.extend(["--env".to_owned(), format!("PLANNOTATOR_TUI_CWD={}", launch.cwd.display())]);
         }
         None => out.extend(["--env".to_owned(), format!("PLANNOTATOR_TUI_FILE={}", launch.file.display())]),

@@ -33,7 +33,7 @@ const USAGE: &str = "usage:
   plannotator-tui herdr open [file.md | folder] [--placement overlay|split|popup] [--deliver-to <pane>]
   plannotator-tui herdr last [--placement P] [--deliver-to <pane>]
   plannotator-tui herdr pane
-  plannotator-tui last [--host claude|codex] [--pid N] [--session <transcript>] [--stdin] [--print] [--pick N]";
+  plannotator-tui last [--host claude|codex|omp] [--pid N] [--session <transcript>] [--stdin] [--print] [--pick N]";
 
 /// Width the document gets when nothing else is known: gutter + rail + gap subtracted.
 fn doc_width(cols: u16) -> usize {
@@ -141,7 +141,7 @@ fn show_config() -> Result<()> {
 
 /// `plannotator-tui herdr open [PATH] [--placement P] [--deliver-to PANE]`.
 fn herdr_command(args: &[String]) -> Result<()> {
-    use crate::herdr::launch::{OpenArgs, plan, plan_last, process_info, run};
+    use crate::herdr::launch::{OpenArgs, agent_list, plan, plan_last, process_info, run};
     let sub = args.first().map(String::as_str);
     if sub == Some("pane") {
         return herdr_pane();
@@ -172,7 +172,8 @@ fn herdr_command(args: &[String]) -> Result<()> {
         let probe = plan(&env, &config, OpenArgs { path: None, ..open.clone() }, &cwd)?;
         let pane = probe.deliver.as_ref().map(|t| t.pane.clone()).or(probe.target_pane);
         let pane = pane.context("no agent pane to read: not focused on one and no --deliver-to")?;
-        plan_last(&env, &config, open, &cwd, &process_info(&env, &pane)?)?
+        let agents = agent_list(&env);
+        plan_last(&env, &config, open, &cwd, agents.as_deref(), || process_info(&env, &pane))?
     } else {
         plan(&env, &config, open, &cwd)?
     };
@@ -182,13 +183,8 @@ fn herdr_command(args: &[String]) -> Result<()> {
 /// The pane entrypoint: Herdr runs this in the opened pane; the environment says what to show.
 fn herdr_pane() -> Result<()> {
     let env = HerdrEnv::from_env();
-    let result = if let Some(pid) = env.message_pid {
-        crate::last::run(&crate::last::LastOptions {
-            host: env.host.clone(),
-            pid: Some(pid),
-            pick: 25,
-            ..crate::last::LastOptions::default()
-        })
+    let result = if let Some(options) = herdr_pane_last_options(&env) {
+        crate::last::run(&options)
     } else {
         let path = env.file.clone().unwrap_or(std::env::current_dir().context("current directory")?);
         interactive(&path)
@@ -203,6 +199,17 @@ fn herdr_pane() -> Result<()> {
         let _ = std::io::stdin().read_line(&mut line);
     }
     result
+}
+
+/// The pane's last-message request, when the launcher supplied either supported source.
+fn herdr_pane_last_options(env: &HerdrEnv) -> Option<crate::last::LastOptions> {
+    (env.message_pid.is_some() || env.session.is_some()).then(|| crate::last::LastOptions {
+        host: env.host.clone(),
+        pid: env.message_pid,
+        session: env.session.clone(),
+        pick: 25,
+        ..crate::last::LastOptions::default()
+    })
 }
 
 /// `plannotator-tui last [--host H] [--pid N] [--session PATH] [--stdin] [--print] [--pick N]`.
@@ -345,4 +352,26 @@ fn snapshot(path: &PathBuf, cols: u16, rows: u16, scroll: i64, select: Option<&s
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used, reason = "tests assert by panicking")]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::*;
+
+    #[test]
+    fn pane_session_source_builds_last_options_without_a_message_pid() {
+        let env = HerdrEnv {
+            host: Some("omp".into()),
+            session: Some(PathBuf::from("/sessions/omp.jsonl")),
+            ..HerdrEnv::default()
+        };
+        let options = herdr_pane_last_options(&env).expect("session starts last-message review");
+        assert_eq!(options.host.as_deref(), Some("omp"));
+        assert_eq!(options.pid, None);
+        assert_eq!(options.session, Some(PathBuf::from("/sessions/omp.jsonl")));
+        assert_eq!(options.pick, 25);
+    }
 }

@@ -131,6 +131,8 @@ pub(crate) struct App {
     /// `last`: the agent's recent messages, newest first, and the picker's cursor.
     candidates: Vec<plannotator_tui_hosts::Message>,
     pick_cursor: usize,
+    /// Checkbox state for the message picker, aligned with `candidates`.
+    pick_selected: Vec<bool>,
     message_host: String,
     message_transcript: String,
     input: Input,
@@ -181,6 +183,7 @@ impl App {
             mode: Mode::Browse,
             candidates: Vec::new(),
             pick_cursor: 0,
+            pick_selected: Vec::new(),
             message_host: String::new(),
             message_transcript: String::new(),
             input: Input::default(),

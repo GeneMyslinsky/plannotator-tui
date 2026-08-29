@@ -30,11 +30,17 @@ fn the_override_wins_when_it_names_a_known_host_and_is_ignored_otherwise() {
 }
 
 #[test]
-fn codex_marker_beats_unsupported_markers_which_are_reported_not_hidden() {
-    assert_eq!(detect_host(env(&[("CODEX_THREAD_ID", "t"), ("OMPCODE", "1")])).expect("host"), Host::Codex);
-    assert!(
-        matches!(detect_host(env(&[("OMPCODE", "1")])), Err(HostError::Unsupported(name)) if name == "OMP")
+fn the_omp_override_selects_omp() {
+    assert_eq!(
+        detect_host(env(&[("PLANNOTATOR_TUI_HOST", "omp"), ("CODEX_THREAD_ID", "t")])).expect("host"),
+        Host::Omp
     );
+}
+
+#[test]
+fn codex_marker_beats_omp_and_other_unsupported_markers() {
+    assert_eq!(detect_host(env(&[("CODEX_THREAD_ID", "t"), ("OMPCODE", "1")])).expect("host"), Host::Codex);
+    assert_eq!(detect_host(env(&[("OMPCODE", "1")])).expect("host"), Host::Omp);
     assert!(matches!(detect_host(env(&[("GEMINI_CLI", "1")])), Err(HostError::Unsupported(_))));
 }
 
@@ -56,5 +62,6 @@ fn labels_are_the_short_names_herdr_uses() {
     assert_eq!(Host::Copilot.label(), "copilot");
     assert_eq!(Host::Droid.label(), "droid");
     assert_eq!(Host::Pi.label(), "pi");
-    assert_eq!(Host::ALL.len(), 5);
+    assert_eq!(Host::Omp.label(), "omp");
+    assert_eq!(Host::ALL.len(), 6);
 }
