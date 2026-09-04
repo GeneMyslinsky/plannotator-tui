@@ -15,7 +15,7 @@ use std::io::Read as _;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
-use plannotator_tui_hosts::Message;
+use plannotator_tui_hosts::{Message, Role};
 use plannotator_tui_schema::{DocumentSource, Provenance};
 
 use crate::app::App;
@@ -72,8 +72,9 @@ pub(crate) fn run(options: &LastOptions) -> Result<()> {
         }
     };
     if options.print {
-        if let Some(newest) = located.messages.first() {
-            println!("{}", newest.text);
+        match newest_assistant(&located.messages) {
+            Some(newest) => println!("{}", newest.text),
+            None => eprintln!("plannotator-tui last: transcript has no assistant messages yet"),
         }
         return Ok(());
     }
@@ -95,4 +96,48 @@ pub(crate) fn message_source(host: &str, transcript: &str, message: &Message) ->
             message_id: Some(message.id.clone()),
         },
     )
+}
+
+/// Multiple selected messages as one document, oldest first so the conversation reads naturally.
+pub(crate) fn messages_source(host: &str, transcript: &str, messages: &[Message]) -> DocumentSource {
+    let content = messages
+        .iter()
+        .rev()
+        .map(|message| {
+            let role = if message.role == Role::Human { "You" } else { "Assistant" };
+            format!("## {role}\n\n{}", message.text)
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    DocumentSource::new(
+        content,
+        format!("{host} · last message"),
+        true,
+        Provenance::AgentMessage {
+            host: host.to_owned(),
+            session: Some(transcript.to_owned()),
+            message_id: messages.first().map(|message| message.id.clone()),
+        },
+    )
+}
+
+fn newest_assistant(messages: &[Message]) -> Option<&Message> {
+    messages.iter().find(|message| message.role == Role::Assistant)
+}
+
+#[cfg(test)]
+mod tests {
+    use plannotator_tui_hosts::{Message, Role};
+
+    use super::newest_assistant;
+
+    #[test]
+    fn print_selects_an_assistant_even_when_a_human_message_is_newest() {
+        let messages = vec![
+            Message { id: "you".to_owned(), role: Role::Human, text: "prompt".to_owned(), at: None },
+            Message { id: "assistant".to_owned(), role: Role::Assistant, text: "reply".to_owned(), at: None },
+        ];
+
+        assert_eq!(newest_assistant(&messages).map(|message| message.text.as_str()), Some("reply"));
+    }
 }

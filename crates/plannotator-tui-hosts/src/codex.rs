@@ -61,8 +61,8 @@ fn is_subagent(path: &Path) -> bool {
         .is_some()
 }
 
-/// The newest `n` assistant messages of the active turn, newest first. `files` are the
-/// thread's transcripts oldest first; entries are read across them in order.
+/// The newest `n` rendered human and assistant messages of the active turn, newest first.
+/// `files` are the thread's transcripts oldest first; entries are read across them in order.
 ///
 /// The active turn starts at the newest `task_started` that follows the newest
 /// `task_complete`; when every turn has completed, the whole thread counts.
@@ -86,18 +86,22 @@ pub fn parse_messages(files: &[String], n: usize) -> Vec<Message> {
         .rev()
         .filter(|v| v.get("type").and_then(Value::as_str) == Some("response_item"))
         .filter(|v| v.pointer("/payload/type").and_then(Value::as_str) == Some("message"))
-        .filter(|v| v.pointer("/payload/role").and_then(Value::as_str) == Some("assistant"))
         .filter_map(|v| {
+            let (role, block_type) = match v.pointer("/payload/role").and_then(Value::as_str) {
+                Some("user") => (Role::Human, "input_text"),
+                Some("assistant") => (Role::Assistant, "output_text"),
+                _ => return None,
+            };
             let text: Vec<&str> = v
                 .pointer("/payload/content")?
                 .as_array()?
                 .iter()
-                .filter(|b| b.get("type").and_then(Value::as_str) == Some("output_text"))
+                .filter(|b| b.get("type").and_then(Value::as_str) == Some(block_type))
                 .filter_map(|b| b.get("text").and_then(Value::as_str))
                 .collect();
             (!text.is_empty()).then(|| Message {
                 id: v.pointer("/payload/id").and_then(Value::as_str).unwrap_or_default().to_owned(),
-                role: Role::Assistant,
+                role,
                 text: text.join("\n\n"),
                 at: v.get("timestamp").and_then(Value::as_str).map(str::to_owned),
             })

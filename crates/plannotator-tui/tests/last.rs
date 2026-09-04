@@ -32,7 +32,7 @@ fn codex_rollout(home: &std::path::Path, day: &str, time: &str, id: &str, text: 
     std::fs::write(
         file,
         format!(
-            "{{\"timestamp\":\"2026-08-{day}T{time}Z\",\"type\":\"event_msg\",\"payload\":{{\"type\":\"task_started\"}}}}\n{{\"timestamp\":\"2026-08-{day}T{time}Z\",\"type\":\"response_item\",\"payload\":{{\"type\":\"message\",\"role\":\"assistant\",\"id\":\"m-{id}\",\"content\":[{{\"type\":\"output_text\",\"text\":\"{text}\"}}]}}}}\n"
+            "{{\"timestamp\":\"2026-08-{day}T{time}Z\",\"type\":\"event_msg\",\"payload\":{{\"type\":\"task_started\"}}}}\n{{\"timestamp\":\"2026-08-{day}T{time}Z\",\"type\":\"response_item\",\"payload\":{{\"type\":\"message\",\"role\":\"assistant\",\"id\":\"m-{id}\",\"content\":[{{\"type\":\"output_text\",\"text\":\"{text}\"}}]}}}}\n{{\"timestamp\":\"2026-08-{day}T{time}Z\",\"type\":\"response_item\",\"payload\":{{\"type\":\"message\",\"role\":\"user\",\"id\":\"u-{id}\",\"content\":[{{\"type\":\"input_text\",\"text\":\"newer prompt\"}}]}}}}\n"
         ),
     )
     .expect("rollout");

@@ -46,7 +46,7 @@ Prebuilt binaries for macOS, Linux and Windows are on the
 ```sh
 plannotator-tui docs/plan.md      # one file
 plannotator-tui docs               # a folder: file tree on the left, counts per file
-plannotator-tui last               # your coding agent's recent replies, pick one, annotate it
+plannotator-tui last               # your coding agent's recent messages, select one or more to annotate
 ```
 
 Drag with the mouse (or `v` and move) to select, then `a` 👍 · `c` 💬 · `d` ✗. `E` copies the
@@ -80,12 +80,12 @@ directory in this repo is the development manifest; users should install Herdr A
 ## Agent replies
 
 `plannotator-tui last` finds the transcript of the agent that launched your shell and shows a
-picker of its recent replies. Hosts: Claude Code, Codex, pi, Oh My Pi, GitHub Copilot CLI,
+picker of its recent messages; Codex includes human prompts as well as replies, and Space selects
+one or more messages to review together. Hosts: Claude Code, Codex, pi, Oh My Pi, GitHub Copilot CLI,
 Droid, Hermes CLI, OpenCode (1 and 2). `--host`, `--pid`, `--session <transcript>` (format sniffed when
 no host is named) and `--session-id <id>` (Hermes, OpenCode) override detection; `--stdin`
-reads a document;
-`--print` writes the newest reply to stdout and always exits 0 (for hooks and scripts).
-Reply reviews are never written to disk.
+reads a document; `--print` writes the newest assistant reply to stdout and always exits 0 (for hooks
+and scripts). Reply reviews are never written to disk.
 
 ## Where annotations live
 

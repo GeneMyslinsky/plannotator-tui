@@ -12,7 +12,6 @@ mod send;
 #[cfg(test)]
 mod tests;
 
-use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
@@ -134,19 +133,13 @@ pub(crate) struct App {
     /// Index into the rail's placed annotations.
     rail_cursor: usize,
     mode: Mode,
-    /// `last`: the agent's recent messages, newest first, and the picker's cursor.
+    /// `last`: the agent's recent messages, newest first, plus the picker's cursor and checks.
     candidates: Vec<plannotator_tui_hosts::Message>,
     pick_cursor: usize,
+    pick_selected: Vec<bool>,
     /// Minutes east of UTC used to draw message times. Pinned in tests so the picker
     /// renders the same on any machine.
     clock_offset: i32,
-    /// The candidate currently on screen, and the one Esc goes back to.
-    pick_open: usize,
-    pick_return: usize,
-    /// Documents already built for candidates. Previewing swaps `open`, and a reply
-    /// review's annotations live only in memory, so the one being left is kept here
-    /// rather than dropped.
-    pick_cache: HashMap<usize, Open>,
     message_host: String,
     message_transcript: String,
     compose: Compose,
@@ -202,10 +195,8 @@ impl App {
             mode: Mode::Browse,
             candidates: Vec::new(),
             pick_cursor: 0,
+            pick_selected: Vec::new(),
             clock_offset: pick::local_offset_minutes(),
-            pick_open: 0,
-            pick_return: 0,
-            pick_cache: HashMap::new(),
             message_host: String::new(),
             message_transcript: String::new(),
             compose: Compose::default(),

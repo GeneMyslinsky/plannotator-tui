@@ -139,10 +139,10 @@ Each candidate is tried until one yields a message ("no messages" means "wrong f
 
 **Codex.** `$CODEX_HOME/sessions/YYYY/MM/DD/rollout-<ts>-<uuid>.jsonl`; thread id = uuid in
 the filename; scan date dirs newest-first. Entries: `type == "response_item"`,
-`payload.type == "message"`, `payload.role == "assistant"`, text from `output_text` blocks.
-Active turn: newest `event_msg` turn-start after the newest turn-complete → walk backward
-from just before it. Multi-file threads (issue #1367, PR #1387 unmerged): collect ALL files
-for the thread from day one and walk backward across them.
+`payload.type == "message"`; user `input_text` blocks become human messages and assistant
+`output_text` blocks become assistant messages. Active turn: newest `event_msg` turn-start after
+the newest turn-complete → walk backward from just before it. Multi-file threads (issue #1367,
+PR #1387 unmerged): collect ALL files for the thread from day one and walk backward across them.
 
 **Delivery contract** (`index.ts:338-350`, ours to freeze): plain mode prints feedback on
 stdout, empty on close, "The user approved." on approve, **exit 0 always** (a non-zero exit
@@ -260,14 +260,14 @@ machine's live Claude Code and Codex files. Four things the rules did not say:
   after a compact works as specified.
 - `<task-notification>` is another machine-written prefix on `user` entries; it joins the
   human-prompt filter.
-- Codex assistant messages carry `phase` (`commentary` | `final_answer`); both are returned
-  newest first so the final answer is the default pick. Subagent rollouts
-  (`payload.source.subagent`) have their own thread ids and are excluded when choosing a
-  thread — grouping by `session_id` would merge a reviewer's output into the main thread.
+- Codex messages carry `phase` (`commentary` | `final_answer`); both assistant phases and human
+  prompts are returned newest first, so the final answer is the default cursor. Subagent rollouts
+  (`payload.source.subagent`) have their own thread ids and are excluded when choosing a thread —
+  grouping by `session_id` would merge a reviewer's output into the main thread.
 
 `visibility` and `isSidechain` did not appear in the sampled transcripts; the rules stay,
-covered by synthesized fixture entries. The stdout contract (`--print`: newest reply, exit 0
-always, errors on stderr) is frozen as decision 9 required.
+covered by synthesized fixture entries. The stdout contract (`--print`: newest assistant reply,
+exit 0 always, errors on stderr) is frozen as decision 9 required.
 
 
 Peer-reviewed against Plannotator's source at main by the plannotator-ops session

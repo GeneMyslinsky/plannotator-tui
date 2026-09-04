@@ -10,8 +10,9 @@ Status: contract for phase 4, 2026-08-28. Detection and extraction rules are dec
   `~` lookups; the binary crate injects `sessions_dir`, `projects_dir`, a process-table
   snapshot, and env.
 - `plannotator-tui last`: the CLI. Detects the host, finds the transcript, shows a picker of
-  the newest messages, opens the chosen one as a transient document (`Provenance::AgentMessage`),
-  and delivers feedback through the normal seam (clipboard standalone, the agent pane in Herdr).
+  the newest messages, opens one selected message or several as one transient document
+  (`Provenance::AgentMessage`), and delivers feedback through the normal seam (clipboard
+  standalone, the agent pane in Herdr).
 - Herdr: `plannotator-tui herdr last` resolves the agent's pid from `herdr pane process-info`
   and opens the pane with `PLANNOTATOR_TUI_MESSAGE_PID`; `plannotator-tui herdr pane` is the
   pane entrypoint that reads the env and opens either a file or a message.
@@ -55,9 +56,10 @@ pub mod codex {
 pub enum HostError { NoTranscript(String), NoMessages(String), Io(std::io::Error) }
 ```
 
-Human-prompt filter (decision 9) applies to `Role::Human`: not `isMeta`, not sidechain, not
-`<local-command-…>` / `<command-name>` / `<system-reminder>` / `<system-notification>`
-prefixes. The picker shows assistant messages by default; humans are kept for context only.
+Human-prompt filtering (decision 9) applies where a host identifies prompt entries: not `isMeta`,
+not sidechain, not `<local-command-…>` / `<command-name>` / `<system-reminder>` /
+`<system-notification>` prefixes. Codex `input_text` prompts are kept alongside assistant
+`output_text` replies so either or both can be selected for context.
 
 Fixtures: `crates/plannotator-tui-hosts/tests/fixtures/claude-code.jsonl` and `codex.jsonl`,
 cut from real transcripts on this machine with every text body replaced by a short
@@ -82,8 +84,8 @@ PLANNOTATOR_TUI_SESSION       explicit transcript path; skips detection (any con
 ```
 plannotator-tui last [--host H] [--pid N] [--session PATH] [--stdin] [--print] [--pick N]
 ```
-- default: detect → find → picker of the newest 25 assistant messages → annotate → send.
-- `--print`: newest message text on stdout, exit 0 (the delivery contract from decision 9).
+- default: detect → find → picker of the newest 25 messages → select one or more → annotate → send.
+- `--print`: newest assistant message text on stdout, exit 0 (the delivery contract from decision 9).
 - `--stdin`: the document is stdin; no detection.
 - Errors name what was searched: "no Claude Code transcript for pid 1234 (looked in …)".
 

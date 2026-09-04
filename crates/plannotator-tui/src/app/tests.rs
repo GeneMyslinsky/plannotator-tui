@@ -92,78 +92,77 @@ fn quitting_with_unsent_feedback_asks_before_it_quits() {
 
 fn candidates() -> Vec<plannotator_tui_hosts::Message> {
     use plannotator_tui_hosts::{Message, Role};
-    let message = |id: &str, text: &str, at: &str| Message {
+    let message = |id: &str, role: Role, text: &str, at: &str| Message {
         id: id.to_owned(),
-        role: Role::Assistant,
+        role,
         text: text.to_owned(),
         at: Some(at.to_owned()),
     };
     vec![
-        message("m3", "# Third\n\nnewest message\n", "2026-08-28T12:41:00.000Z"),
-        message("m2", "# Second\n\nmiddle message\n", "2026-08-28T12:38:00.000Z"),
-        message("m1", "# First\n\noldest message\n", "2026-08-28T12:30:00.000Z"),
+        message("m4", Role::Human, "latest prompt", "2026-08-28T12:43:00.000Z"),
+        message("m3", Role::Assistant, "# Third\n\nnewest reply\n", "2026-08-28T12:41:00.000Z"),
+        message("m2", Role::Human, "earlier prompt", "2026-08-28T12:38:00.000Z"),
+        message("m1", Role::Assistant, "# First\n\noldest reply\n", "2026-08-28T12:30:00.000Z"),
     ]
 }
 
 #[test]
-fn the_picker_lists_newest_first_and_opens_the_chosen_message() {
-    let mut app = App::open_message("claude", "/tmp/transcript.jsonl", candidates(), 60, Box::new(Discard))
+fn the_picker_selects_messages_and_opens_them_as_one_conversation() {
+    let mut app = App::open_message("codex", "/tmp/transcript.jsonl", candidates(), 60, Box::new(Discard))
         .expect("opens");
     app.clock_offset = 0;
     assert_eq!(app.mode, Mode::Pick, "more than one candidate asks which");
+    assert_eq!(app.pick_cursor, 1, "the newest assistant is open and focused");
+    assert_eq!(app.open.doc.source, "# Third\n\nnewest reply\n");
     let rows = draw(&mut app);
     let listed: Vec<&str> = rows.iter().map(String::as_str).filter(|r| r.contains("12:")).collect();
-    assert_eq!(listed.len(), 3, "{rows:?}");
-    assert!(listed[0].contains("12:41  # Third"), "{:?}", listed[0]);
-    assert!(listed[2].contains("12:30  # First"), "{:?}", listed[2]);
+    assert_eq!(listed.len(), 4, "{rows:?}");
+    assert!(listed[0].contains("[ ] You 12:43  latest prompt"), "{:?}", listed[0]);
+    assert!(listed[1].contains("[ ] Assistant 12:41  # Third"), "{:?}", listed[1]);
 
-    app.handle_event(&Event::Key(KeyEvent::from(KeyCode::Char('j')))).expect("j");
-    app.handle_event(&Event::Key(KeyEvent::from(KeyCode::Enter))).expect("enter");
+    app.handle_event(&Event::Key(KeyEvent::from(KeyCode::Char(' ')))).expect("select reply");
+    app.handle_event(&Event::Key(KeyEvent::from(KeyCode::Char('j')))).expect("next");
+    app.handle_event(&Event::Key(KeyEvent::from(KeyCode::Char(' ')))).expect("select prompt");
+    app.handle_event(&Event::Key(KeyEvent::from(KeyCode::Enter))).expect("open");
     assert_eq!(app.mode, Mode::Browse);
-    assert_eq!(app.open.doc.source, "# Second\n\nmiddle message\n");
+    assert_eq!(app.open.doc.source, "## You\n\nearlier prompt\n\n## Assistant\n\n# Third\n\nnewest reply\n");
     assert!(app.open.store.is_transient(), "a message is never written to disk");
-    app.add_block_annotation(0, Kind::Comment, "x".to_owned()).expect("annotate");
-    assert!(app.open.store.is_transient());
 }
 
 #[test]
-fn escaping_the_picker_keeps_the_newest_message() {
-    let mut app = App::open_message("claude", "/tmp/transcript.jsonl", candidates(), 60, Box::new(Discard))
+fn opening_without_a_selection_keeps_the_picker_and_explains_why() {
+    let mut app = App::open_message("codex", "/tmp/transcript.jsonl", candidates(), 60, Box::new(Discard))
+        .expect("opens");
+
+    app.handle_event(&Event::Key(KeyEvent::from(KeyCode::Enter))).expect("enter");
+
+    assert_eq!(app.mode, Mode::Pick);
+    assert_eq!(app.status.as_deref(), Some("select at least one message before opening"));
+}
+
+#[test]
+fn escaping_the_picker_keeps_the_newest_assistant_message() {
+    let mut app = App::open_message("codex", "/tmp/transcript.jsonl", candidates(), 60, Box::new(Discard))
         .expect("opens");
     app.handle_event(&Event::Key(KeyEvent::from(KeyCode::Esc))).expect("esc");
     assert_eq!(app.mode, Mode::Browse);
-    assert_eq!(app.open.doc.source, "# Third\n\nnewest message\n");
-    assert_eq!(app.open.source.name, "claude · last message");
+    assert_eq!(app.open.doc.source, "# Third\n\nnewest reply\n");
+    assert_eq!(app.open.source.name, "codex · last message");
     app.handle_event(&Event::Key(KeyEvent::from(KeyCode::Char('p')))).expect("p");
     assert_eq!(app.mode, Mode::Pick, "p reopens the picker");
 }
 
 #[test]
-fn moving_the_picker_cursor_previews_that_message() {
-    let mut app = App::open_message("claude", "/tmp/transcript.jsonl", candidates(), 60, Box::new(Discard))
+fn opening_one_selected_human_message_keeps_its_raw_text() {
+    let mut app = App::open_message("codex", "/tmp/transcript.jsonl", candidates(), 60, Box::new(Discard))
         .expect("opens");
-    assert_eq!(app.open.doc.source, "# Third\n\nnewest message\n", "the newest opens behind the picker");
+    app.handle_event(&Event::Key(KeyEvent::from(KeyCode::Char('k')))).expect("previous");
+    app.handle_event(&Event::Key(KeyEvent::from(KeyCode::Char(' ')))).expect("select human");
+    app.handle_event(&Event::Key(KeyEvent::from(KeyCode::Enter))).expect("open");
 
-    app.handle_event(&Event::Key(KeyEvent::from(KeyCode::Char('j')))).expect("j");
-
-    assert_eq!(app.mode, Mode::Pick, "previewing does not leave the picker");
-    assert_eq!(app.open.doc.source, "# Second\n\nmiddle message\n", "the document follows the cursor");
-}
-
-#[test]
-fn previewing_away_and_back_keeps_annotations() {
-    let mut app = App::open_message("claude", "/tmp/transcript.jsonl", candidates(), 60, Box::new(Discard))
-        .expect("opens");
-    app.handle_event(&Event::Key(KeyEvent::from(KeyCode::Esc))).expect("esc");
-    app.add_block_annotation(0, Kind::Comment, "keep me".to_owned()).expect("annotate");
-    assert_eq!(app.open.store.placed().len(), 1);
-
-    app.handle_event(&Event::Key(KeyEvent::from(KeyCode::Char('p')))).expect("p");
-    app.handle_event(&Event::Key(KeyEvent::from(KeyCode::Char('j')))).expect("j");
-    app.handle_event(&Event::Key(KeyEvent::from(KeyCode::Char('k')))).expect("k");
-
-    assert_eq!(app.open.doc.source, "# Third\n\nnewest message\n", "back where we started");
-    assert_eq!(app.open.store.placed().len(), 1, "a reply review only holds annotations in memory");
+    assert_eq!(app.mode, Mode::Browse);
+    assert_eq!(app.open.doc.source, "latest prompt");
+    assert_eq!(app.open.source.name, "codex · last message");
 }
 
 /// A folder of `count` Markdown files named `f00.md`, `f01.md`, … in a fresh temp dir.

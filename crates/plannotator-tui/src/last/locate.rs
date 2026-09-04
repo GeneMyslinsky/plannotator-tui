@@ -1,10 +1,10 @@
-//! Select the exact-session or fallback discovery path and read its assistant messages.
+//! Select the exact-session or fallback discovery path and read its rendered messages.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{Context, Result, bail};
-use plannotator_tui_hosts::{Host, HostError, Message, Role, detect_host, sniff};
+use plannotator_tui_hosts::{Host, HostError, Message, detect_host, sniff};
 use plannotator_tui_schema::{DocumentSource, Provenance};
 
 use super::roots::Roots;
@@ -14,7 +14,7 @@ pub(crate) struct Located {
     pub(crate) host: Host,
     /// The transcript file (Claude) or the newest thread file (Codex); for the label.
     pub(crate) transcript: PathBuf,
-    /// Assistant messages, newest first, at most `options.pick`.
+    /// Rendered human and assistant messages, newest first, at most `options.pick`.
     pub(crate) messages: Vec<Message>,
 }
 
@@ -40,10 +40,8 @@ pub(crate) fn locate(options: &LastOptions) -> Result<Located> {
         let cwd = agent_cwd()?;
         fallback::read(host, options, &cwd, &roots, pick)?
     };
-    let messages: Vec<Message> =
-        messages.into_iter().filter(|message| message.role == Role::Assistant).collect();
     if messages.is_empty() {
-        bail!("transcript {} has no assistant messages yet", transcript.display());
+        bail!("transcript {} has no rendered messages yet", transcript.display());
     }
     Ok(Located { host, transcript, messages })
 }
